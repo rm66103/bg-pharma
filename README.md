@@ -4,7 +4,7 @@ Automated tool to search DailyMed (NIH) for capsule or liquid medications that d
 
 ## Installation
 
-1. Install Python 3.7 or higher
+1. Install Python 3.10.0 or higher
 2. Install dependencies:
 
 ```bash
