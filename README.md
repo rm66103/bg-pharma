@@ -76,6 +76,8 @@ The script automatically checks for these allergens in inactive ingredients:
 - lactose
 - whey
 - wheat
+- see `search_medication.py:21` for full list
+
 
 ## Troubleshooting
 
