@@ -19,6 +19,7 @@ from openai import OpenAI
 
 # Allergy list to check against
 ALLERGENS = [
+    "egg",
     "eggs",
     "corn",
     "cornstarch",
@@ -39,7 +40,6 @@ ALLERGENS = [
     "casein",
     "whey",
     "nuts",
-    "eggs",
     "xylitol",
     "sorbitol"
 ]
@@ -88,7 +88,7 @@ class MedicationSearcher:
     def _get_search_url(self, medication_name: str, page: int = 1) -> str:
         """Construct search URL with parameters."""
         params = {
-            'labeltype': 'all',
+            'labeltype': 'human',
             'query': medication_name,
             'pagesize': MAX_PAGE_SIZE,
             'page': page
