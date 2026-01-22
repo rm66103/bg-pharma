@@ -391,7 +391,7 @@ class MedicationSearcher:
         return None, verbose_info
     
     def _analyze_form_type_ai(self, title: str) -> Dict[str, any]:
-        """Use AI to analyze medication title for form type."""
+        """Use AI to analyze medication title for form type and disqualifiers."""
         if not self.openai_client:
             # Fallback to regex if no OpenAI key
             return self._analyze_form_type_regex(title)
@@ -401,11 +401,14 @@ class MedicationSearcher:
 Medication name: "{title}"
 
 Respond with ONLY a JSON object in this exact format:
-{{"form_type": "capsule|liquid|tablet|other_oral|disqualify", "confidence": "high|medium|low", "reasoning": "brief explanation"}}
+{{"form_type": "capsule|liquid|tablet|other_oral|disqualify", "confidence": "high|medium|low", "reasoning": "brief explanation", "disqualifiers": ["reason1", "reason2", ...]}}
 
 Qualifying forms: capsule, liquid, tablet, oral suspension, oral solution, syrup, chewable tablet
 Disqualifying forms: cream, ointment, injection, topical, gel, lotion, spray, patch, eye drops, ear drops, nasal spray
+Disqualifying indicators: "Childrens" or "Children's" in the name (children's medications should be disqualified)
 
+The "disqualifiers" array should list ALL reasons for disqualification (e.g., ["childrens_medication", "topical"] if it's both).
+If the medication is qualified, "disqualifiers" should be an empty array: [].
 If uncertain, choose "disqualify" to be safe."""
 
         try:
@@ -416,7 +419,7 @@ If uncertain, choose "disqualify" to be safe."""
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.1,
-                max_tokens=150
+                max_tokens=225
             )
             
             result_text = response.choices[0].message.content.strip()
@@ -424,6 +427,9 @@ If uncertain, choose "disqualify" to be safe."""
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())
+                # Ensure disqualifiers list exists (for backward compatibility)
+                if 'disqualifiers' not in result:
+                    result['disqualifiers'] = []
                 return result
         except Exception as e:
             print(f"AI analysis failed: {e}, using fallback")
@@ -433,15 +439,25 @@ If uncertain, choose "disqualify" to be safe."""
     def _analyze_form_type_regex(self, title: str) -> Dict[str, any]:
         """Fallback regex-based form type analysis."""
         title_lower = title.lower()
+        disqualifiers = []
         
-        # Check for disqualifying forms first
+        # Check for children's medications
+        if 'childrens' in title_lower or "children's" in title_lower:
+            disqualifiers.append("childrens_medication")
+        
+        # Check for disqualifying forms
         for form in DISQUALIFYING_FORMS:
             if form in title_lower:
-                return {
-                    "form_type": "disqualify",
-                    "confidence": "high",
-                    "reasoning": f"Contains '{form}' in name"
-                }
+                disqualifiers.append(f"form_{form}")
+        
+        # If we have disqualifiers, return disqualify
+        if disqualifiers:
+            return {
+                "form_type": "disqualify",
+                "confidence": "high",
+                "reasoning": f"Contains disqualifying indicators: {', '.join(disqualifiers)}",
+                "disqualifiers": disqualifiers
+            }
         
         # Check for qualifying forms
         for form in QUALIFYING_FORMS:
@@ -449,13 +465,15 @@ If uncertain, choose "disqualify" to be safe."""
                 return {
                     "form_type": form,
                     "confidence": "high",
-                    "reasoning": f"Contains '{form}' in name"
+                    "reasoning": f"Contains '{form}' in name",
+                    "disqualifiers": []
                 }
         
         return {
             "form_type": "unknown",
             "confidence": "low",
-            "reasoning": "Could not determine form type"
+            "reasoning": "Could not determine form type",
+            "disqualifiers": []
         }
     
     def _extract_inactive_ingredients_ai(self, soup: BeautifulSoup) -> Tuple[List[str], Dict]:
@@ -784,6 +802,16 @@ Extract only the actual ingredient names, cleaned of extra text like UNII codes.
         # Step 3: Analyze form type
         form_analysis = self._analyze_form_type_ai(title)
         result['form_analysis'] = form_analysis
+        
+        # Ensure disqualifiers list exists (for backward compatibility)
+        disqualifiers = form_analysis.get('disqualifiers', [])
+        
+        # Check for disqualifiers (children's medication, etc.)
+        if disqualifiers:
+            result['disqualification_reason'] = f"disqualifiers: {', '.join(disqualifiers)}"
+            return result
+        
+        # Check for disqualifying form type
         if form_analysis.get('form_type') in ['disqualify', 'unknown']:
             result['disqualification_reason'] = f"form_type_{form_analysis.get('form_type')}"
             return result
@@ -917,10 +945,13 @@ Extract only the actual ingredient names, cleaned of extra text like UNII codes.
             form_type = form_analysis.get('form_type', 'unknown')
             confidence = form_analysis.get('confidence', 'unknown')
             reasoning = form_analysis.get('reasoning', '')
+            disqualifiers = form_analysis.get('disqualifiers', [])
             print(f"      Form Type: {form_type} (confidence: {confidence})")
             if reasoning:
                 print(f"        Reasoning: {reasoning}")
-            if form_type in ['disqualify', 'unknown']:
+            if disqualifiers:
+                print(f"        Disqualifiers: {', '.join(disqualifiers)}")
+            if form_type in ['disqualify', 'unknown'] or disqualifiers:
                 return  # Skip ingredient info if disqualified at form stage
         
         # Inactive ingredients
